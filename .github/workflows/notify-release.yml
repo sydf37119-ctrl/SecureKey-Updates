@@ -24,7 +24,7 @@ jobs:
         with:
           project_id: ${{ steps.auth.outputs.project_id }}
 
-      - name: Send update notification to all SecureKey users
+      - name: Send update notification
         env:
           PROJECT_ID: ${{ steps.auth.outputs.project_id }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -35,28 +35,23 @@ jobs:
 
           BODY="$(jq -n \
             --arg title "تحديث جديد لتطبيق SecureKey" \
-            --arg body "يتوفر الآن ${RELEASE_NAME:-$RELEASE_TAG}. اضغط لمعرفة التحديث وتنزيله." \
-            --arg tag "$RELEASE_TAG" \
+            --arg body "يتوفر إصدار جديد ${RELEASE_NAME:-$RELEASE_TAG}. اضغط لمعرفة التفاصيل وتنزيله." \
+            --arg version "$RELEASE_TAG" \
             --arg url "$RELEASE_URL" \
             '{
               message: {
                 topic: "securekey_updates",
-                notification: {
-                  title: $title,
-                  body: $body
-                },
                 data: {
                   type: "app_update",
-                  version: $tag,
+                  title: $title,
+                  body: $body,
+                  version: $version,
                   release_url: $url
                 },
                 android: {
                   priority: "HIGH",
-                  notification: {
-                    channel_id: "securekey_updates",
-                    click_action: "OPEN_SECUREKEY_UPDATES",
-                    tag: "securekey-release"
-                  }
+                  ttl: "2419200s",
+                  collapse_key: "securekey-update"
                 }
               }
             }')"
@@ -68,5 +63,4 @@ jobs:
             -d "$BODY")"
 
           echo "$RESPONSE"
-
           echo "$RESPONSE" | jq -e '.name' >/dev/null
