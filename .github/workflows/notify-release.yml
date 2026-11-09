@@ -1,4 +1,3 @@
-
 name: SecureKey Automatic Update Notifications
 
 on:
@@ -7,13 +6,103 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
+
+concurrency:
+  group: securekey-release-update
+  cancel-in-progress: false
 
 jobs:
-  notify-users:
+  update-manifest-and-notify:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out main branch
+        if: github.event_name == 'release'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Android build tools
+        if: github.event_name == 'release'
+        uses: android-actions/setup-android@v3
+
+      - name: Download APK and update latest.json
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "SecureKey_release.apk" \
+            --dir dist
+
+          APK="dist/SecureKey_release.apk"
+          test -s "$APK"
+
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          if [ -z "$AAPT" ]; then
+            sdkmanager "build-tools;35.0.0"
+            AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          fi
+          test -x "$AAPT"
+
+          BADGING="$("$AAPT" dump badging "$APK" | sed -n '1p')"
+          VERSION_CODE="$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          VERSION_NAME="$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ]; then
+            echo "::error::Could not read versionCode/versionName from APK."
+            exit 1
+          fi
+
+          CURRENT_CODE="$(jq -r '.versionCode // 0' latest.json)"
+          if [ "$VERSION_CODE" -le "$CURRENT_CODE" ]; then
+            echo "::error::APK versionCode ($VERSION_CODE) must be greater than latest.json versionCode ($CURRENT_CODE)."
+            exit 1
+          fi
+
+          SHA256="$(sha256sum "$APK" | awk '{print $1}')"
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SecureKey_release.apk"
+          MINIMUM_CODE="$(jq -r '.minimumVersionCode // 1' latest.json)"
+          FORCE_UPDATE="$(jq -r '.forceUpdate // false' latest.json)"
+          NOTES_JSON="$(python3 -c 'import json,os; s=os.environ.get("RELEASE_BODY",""); a=[x.strip().lstrip("-*• ").strip() for x in s.splitlines() if x.strip()]; print(json.dumps(a or ["تحسينات وإصلاحات جديدة"], ensure_ascii=False))')"
+
+          jq -n \
+            --arg versionName "$VERSION_NAME" \
+            --argjson versionCode "$VERSION_CODE" \
+            --argjson minimumVersionCode "$MINIMUM_CODE" \
+            --argjson forceUpdate "$FORCE_UPDATE" \
+            --arg apkUrl "$APK_URL" \
+            --arg sha256 "$SHA256" \
+            --argjson releaseNotes "$NOTES_JSON" \
+            '{
+              versionName: $versionName,
+              versionCode: $versionCode,
+              minimumVersionCode: $minimumVersionCode,
+              forceUpdate: $forceUpdate,
+              apkUrl: $apkUrl,
+              sha256: $sha256,
+              releaseNotes: $releaseNotes
+            }' > latest.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add latest.json
+          if git diff --cached --quiet; then
+            echo "latest.json did not change."
+          else
+            git commit -m "Update latest.json for ${RELEASE_TAG}"
+            git push origin HEAD:main
+          fi
+
       - name: Authenticate with Firebase
         id: auth
         uses: google-github-actions/auth@v3
@@ -31,15 +120,12 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name || 'test' }}
           RELEASE_NAME: ${{ github.event.release.name || 'اختبار إشعارات SecureKey' }}
           RELEASE_URL: ${{ github.event.release.html_url || 'https://github.com/sydf37119-ctrl/SecureKey-Updates/releases' }}
-
         run: |
-          set -e
-
+          set -euo pipefail
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
-
           BODY="$(jq -n \
             --arg title "تحديث جديد لتطبيق SecureKey" \
-            --arg body "يتوفر إصدار جديد ${RELEASE_NAME}. اضغط لمعرفة التفاصيل وتنزيله." \
+            --arg body "يتوفر إصدار جديد ${RELEASE_NAME:-$RELEASE_TAG}. اضغط لمعرفة التفاصيل وتنزيله." \
             --arg version "$RELEASE_TAG" \
             --arg url "$RELEASE_URL" \
             '{
@@ -60,7 +146,7 @@ jobs:
               }
             }')"
 
-          RESPONSE="$(curl -sS -X POST \
+          RESPONSE="$(curl --fail-with-body -sS -X POST \
             "https://fcm.googleapis.com/v1/projects/${PROJECT_ID}/messages:send" \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H "Content-Type: application/json; charset=UTF-8" \
@@ -68,5 +154,4 @@ jobs:
 
           echo "$RESPONSE"
           echo "$RESPONSE" | jq -e '.name' >/dev/null
-
           echo "SecureKey notification sent successfully."
