@@ -1,14 +1,11 @@
-
 {
   "versionName": "1.1",
-  "versionCode": 2,
+  "versionCode": 3,
   "minimumVersionCode": 1,
   "forceUpdate": false,
-  "apkUrl": "https://github.com/sydf37119-ctrl/SecureKey-Updates/releases/download/v1.1/SecureKey_release.apk",
-  "sha256": "ae1e1967c845354024f3d29e8a993e04c5c8a632ed914c297ce3f2ea700a85d7",
+  "apkUrl": "https://github.com/sydf37119-ctrl/SecureKey-Updates/releases/download/v1.1.2/SecureKey_release.apk",
+  "sha256": "f863efa688a181f074b0e70a872b272ed269f87d002d55872b837717ca62579d",
   "releaseNotes": [
-    "تحسينات وتطويرات جديدة",
-    "إضافة نظام التحديث عبر GitHub",
-    "تحسين تجربة الاستخدام"
+    "SecureKey version 1.1 – Improvements and bug fixes."
   ]
 }
