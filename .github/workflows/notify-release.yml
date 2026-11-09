@@ -4,6 +4,7 @@ name: SecureKey Automatic Update Notifications
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,15 +28,18 @@ jobs:
       - name: Send update notification
         env:
           PROJECT_ID: ${{ steps.auth.outputs.project_id }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
-          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || 'test' }}
+          RELEASE_NAME: ${{ github.event.release.name || 'اختبار إشعارات SecureKey' }}
+          RELEASE_URL: ${{ github.event.release.html_url || 'https://github.com/sydf37119-ctrl/SecureKey-Updates/releases' }}
+
         run: |
+          set -e
+
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
 
           BODY="$(jq -n \
             --arg title "تحديث جديد لتطبيق SecureKey" \
-            --arg body "يتوفر إصدار جديد ${RELEASE_NAME:-$RELEASE_TAG}. اضغط لمعرفة التفاصيل وتنزيله." \
+            --arg body "يتوفر إصدار جديد ${RELEASE_NAME}. اضغط لمعرفة التفاصيل وتنزيله." \
             --arg version "$RELEASE_TAG" \
             --arg url "$RELEASE_URL" \
             '{
@@ -64,3 +68,5 @@ jobs:
 
           echo "$RESPONSE"
           echo "$RESPONSE" | jq -e '.name' >/dev/null
+
+          echo "SecureKey notification sent successfully."
